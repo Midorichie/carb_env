@@ -1,8 +1,16 @@
+Here's the combined code with all the updates:
+Python
 import hashlib
 import time
+import ecdsa
+import socket
+import flask
+import unittest
 from typing import List, Dict
 from enum import Enum
 from dataclasses import dataclass
+
+app = flask.Flask(__name__)
 
 class CreditType(Enum):
     RENEWABLE_ENERGY = "Renewable Energy"
@@ -18,14 +26,20 @@ class CarbonCredit:
     expiry_date: float
 
 class Transaction:
-    def __init__(self, sender: str, recipient: str, credits: List[CarbonCredit]):
+    def __init__(self, sender: str, recipient: str, credits: List[CarbonCredit], fee: float, private_key: ecdsa.SigningKey):
         self.sender = sender
         self.recipient = recipient
         self.credits = credits
+        self.fee = fee
         self.timestamp = time.time()
+        self.signature = self.sign_transaction(private_key)
+
+    def sign_transaction(self, private_key: ecdsa.SigningKey) -> bytes:
+        transaction_string = f"{self.sender}{self.recipient}{self.credits}{self.fee}{self.timestamp}"
+        return private_key.sign(transaction_string.encode())
 
     def calculate_hash(self) -> str:
-        transaction_string = f"{self.sender}{self.recipient}{self.credits}{self.timestamp}"
+        transaction_string = f"{self.sender}{self.recipient}{self.credits}{self.fee}{self.timestamp}"
         return hashlib.sha256(transaction_string.encode()).hexdigest()
 
 class Block:
@@ -54,6 +68,9 @@ class Blockchain:
         self.pending_transactions: List[Transaction] = []
         self.mining_reward = 1
         self.credit_balances: Dict[str, Dict[CreditType, float]] = {}
+        self.block_count = 0
+        self.transaction_count = 0
+        self.network_hash_rate = 0
 
     def create_genesis_block(self) -> Block:
         return Block(0, [], time.time(), "0")
@@ -66,15 +83,21 @@ class Blockchain:
         block.mine_block(self.difficulty)
         self.chain.append(block)
         self.pending_transactions = [
-            Transaction("SYSTEM", miner_address, [CarbonCredit(CreditType.RENEWABLE_ENERGY, self.mining_reward, "SYSTEM", time.time(), time.time() + 31536000)])
+            Transaction("SYSTEM", miner_address, [CarbonCredit(CreditType.RENEWABLE_ENERGY, self.mining_reward, "SYSTEM", time.time(), time.time() + 31536000)], 0, ecdsa.SigningKey.generate())
         ]
         self._update_balances(block)
+        self.block_count += 1
+        self.transaction_count += len(block.transactions)
 
     def create_transaction(self, transaction: Transaction):
-        if self._is_transaction_valid(transaction):
-            self.pending_transactions.append(transaction)
-        else:
-            raise ValueError("Invalid transaction")
+        try:
+            if self._is_transaction_valid(transaction):
+                self.pending_transactions.append(transaction)
+                self.transaction_count += 1
+            else:
+                raise ValueError("Invalid transaction")
+        except ValueError as e:
+            print(f"Error creating transaction: {e}")
 
     def _is_transaction_valid(self, transaction: Transaction) -> bool:
         sender_balance = self.get_balance(transaction.sender)
@@ -98,47 +121,4 @@ class Blockchain:
                 
                 # Add to recipient
                 self.credit_balances.setdefault(recipient, {})
-                self.credit_balances[recipient][credit.credit_type] = self.credit_balances[recipient].get(credit.credit_type, 0) + credit.amount
-
-    def is_chain_valid(self) -> bool:
-        for i in range(1, len(self.chain)):
-            current_block = self.chain[i]
-            previous_block = self.chain[i-1]
-
-            if current_block.hash != current_block.calculate_hash():
-                return False
-
-            if current_block.previous_hash != previous_block.hash:
-                return False
-
-        return True
-
-    def get_all_transactions(self, address: str) -> List[Transaction]:
-        transactions = []
-        for block in self.chain:
-            for transaction in block.transactions:
-                if transaction.sender == address or transaction.recipient == address:
-                    transactions.append(transaction)
-        return transactions
-
-# Example usage
-blockchain = Blockchain()
-
-# Create some initial carbon credits
-blockchain.create_transaction(Transaction("SYSTEM", "company1", [CarbonCredit(CreditType.RENEWABLE_ENERGY, 100, "SYSTEM", time.time(), time.time() + 31536000)]))
-blockchain.create_transaction(Transaction("SYSTEM", "company2", [CarbonCredit(CreditType.REFORESTATION, 50, "SYSTEM", time.time(), time.time() + 31536000)]))
-blockchain.mine_pending_transactions("miner1")
-
-# Perform a transaction
-blockchain.create_transaction(Transaction("company1", "company3", [CarbonCredit(CreditType.RENEWABLE_ENERGY, 30, "SYSTEM", time.time(), time.time() + 31536000)]))
-blockchain.mine_pending_transactions("miner2")
-
-print("Company1 balance:", blockchain.get_balance("company1"))
-print("Company2 balance:", blockchain.get_balance("company2"))
-print("Company3 balance:", blockchain.get_balance("company3"))
-print("Miner1 balance:", blockchain.get_balance("miner1"))
-print("Miner2 balance:", blockchain.get_balance("miner2"))
-
-print("Blockchain valid:", blockchain.is_chain_valid())
-
-print("Company1 transactions:", blockchain.get_all_transactions("company1"))
+                self.credit_balances
